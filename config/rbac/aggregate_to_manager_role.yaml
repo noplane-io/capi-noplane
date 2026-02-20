@@ -1,0 +1,10 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: capi-noplane-aggregate-to-manager
+  labels:
+    cluster.x-k8s.io/aggregate-to-manager: "true"
+rules:
+- apiGroups: ["controlplane.noplane.io"]
+  resources: ["noplanecontrolplanes", "noplanecontrolplanetemplates"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

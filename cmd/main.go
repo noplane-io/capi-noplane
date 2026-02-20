@@ -35,7 +35,10 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+
 	controlplanev1alpha1 "github.com/noplane-io/capi-noplane/api/v1alpha1"
+	"github.com/noplane-io/capi-noplane/internal/api/noplane"
 	"github.com/noplane-io/capi-noplane/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -49,6 +52,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(controlplanev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(clusterv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -179,8 +183,9 @@ func main() {
 	}
 
 	if err := (&controller.NoPlaneControlPlaneReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		ClientFactory: noplane.NewClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "NoPlaneControlPlane")
 		os.Exit(1)

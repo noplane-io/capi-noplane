@@ -25,6 +25,7 @@ resources:
 - noplanecontrolplanetemplate_admin_role.yaml
 - noplanecontrolplanetemplate_editor_role.yaml
 - noplanecontrolplanetemplate_viewer_role.yaml
+- aggregate_to_manager_role.yaml
 - noplanecontrolplane_admin_role.yaml
 - noplanecontrolplane_editor_role.yaml
 - noplanecontrolplane_viewer_role.yaml

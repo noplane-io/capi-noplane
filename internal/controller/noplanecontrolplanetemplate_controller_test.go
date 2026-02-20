@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -51,7 +52,17 @@ var _ = Describe("NoPlaneControlPlaneTemplate Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: controlplanev1alpha1.NoPlaneControlPlaneTemplateSpec{
+						Template: controlplanev1alpha1.NoPlaneControlPlaneTemplateResource{
+							Spec: controlplanev1alpha1.NoPlaneControlPlaneSpec{
+								Version: "v1.29.2",
+								CredentialsSecretRef: corev1.SecretReference{
+									Name:      "noplane-credentials",
+									Namespace: "default",
+								},
+							},
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

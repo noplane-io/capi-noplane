@@ -19,7 +19,7 @@ package v1alpha1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 // NoPlaneControlPlaneSpec defines the desired state of NoPlaneControlPlane.
@@ -39,7 +39,7 @@ type NoPlaneControlPlaneSpec struct {
 	// Populated by the controller once ready. May be set by the user for
 	// brownfield adoption.
 	// +optional
-	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
+	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitzero"`
 
 	// credentialsSecretRef references the Secret containing the noplane.io API key.
 	// The Secret must contain a key named "apiKey".
