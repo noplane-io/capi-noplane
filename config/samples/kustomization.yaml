@@ -1,0 +1,5 @@
+## Append samples of your project ##
+resources:
+- controlplane_v1alpha1_noplanecontrolplane.yaml
+- controlplane_v1alpha1_noplanecontrolplanetemplate.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

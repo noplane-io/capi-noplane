@@ -1,0 +1,9 @@
+apiVersion: controlplane.noplane.io/v1alpha1
+kind: NoPlaneControlPlane
+metadata:
+  labels:
+    app.kubernetes.io/name: capi-noplane
+    app.kubernetes.io/managed-by: kustomize
+  name: noplanecontrolplane-sample
+spec:
+  # TODO(user): Add fields here
