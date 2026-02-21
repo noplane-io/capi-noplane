@@ -91,6 +91,18 @@ make manifests      # regenerate CRDs and RBAC
 make release IMG=<registry>/capi-noplane:<tag>  # build clusterctl release artifacts
 ```
 
+### Local testing with clusterctl
+
+Build the release artifacts and install them as a local override:
+
+```sh
+make release IMG=ghcr.io/noplane-io/capi-noplane:v0.1.0
+mkdir -p ~/.cluster-api/overrides/control-plane-noplane/v0.1.0/
+cp out/* ~/.cluster-api/overrides/control-plane-noplane/v0.1.0/
+```
+
+Then use `clusterctl init` as described in the Quick Start.
+
 ## License
 
 Copyright 2026.
