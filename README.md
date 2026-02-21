@@ -1,121 +1,95 @@
 # capi-noplane
-// TODO(user): Add simple overview of use/purpose
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+A [Cluster API](https://cluster-api.sigs.k8s.io/) control plane provider that delegates Kubernetes control plane lifecycle to the [noplane.io](https://noplane.io) hosted service. Worker nodes bootstrap using standard [Kubeadm (CABPK)](https://cluster-api.sigs.k8s.io/tasks/bootstrap/kubeadm-bootstrap/) — no custom bootstrap provider is needed.
 
-## Getting Started
+## Quick Start
+
+This guide creates a Kubernetes cluster with a NoPlane-managed control plane and Hetzner Cloud worker nodes.
 
 ### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+- A Kubernetes management cluster
+- [clusterctl](https://cluster-api.sigs.k8s.io/user/quick-start#install-clusterctl) installed
+- A [noplane.io](https://noplane.io) account and API key
+- A [Hetzner Cloud](https://www.hetzner.com/cloud) account and API token
 
-```sh
-make docker-build docker-push IMG=<some-registry>/capi-noplane:tag
+### 1. Configure clusterctl
+
+Add the NoPlane provider to `~/.cluster-api/clusterctl.yaml`:
+
+```yaml
+providers:
+  - name: "noplane"
+    url: "https://github.com/noplane-io/capi-noplane/releases/latest/control-plane-components.yaml"
+    type: "ControlPlaneProvider"
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
-
-**Install the CRDs into the cluster:**
+### 2. Initialize providers
 
 ```sh
-make install
+clusterctl init \
+  --infrastructure hetzner \
+  --bootstrap kubeadm \
+  --control-plane noplane
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+### 3. Create credentials
 
 ```sh
-make deploy IMG=<some-registry>/capi-noplane:tag
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: noplane-credentials
+  namespace: default
+  labels:
+    clusterctl.cluster.x-k8s.io/move: ""
+type: Opaque
+stringData:
+  apiKey: "<YOUR_NOPLANE_API_KEY>"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hetzner
+  namespace: default
+  labels:
+    clusterctl.cluster.x-k8s.io/move: ""
+type: Opaque
+stringData:
+  hcloud: "<YOUR_HCLOUD_TOKEN>"
+EOF
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
-
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+### 4. Create a cluster
 
 ```sh
-kubectl apply -k config/samples/
+kubectl apply -f docs/examples/my-cluster.yaml
 ```
 
->**NOTE**: Ensure that the samples has default values to test it out.
+This creates:
+- A NoPlane-managed control plane running Kubernetes v1.33.0
+- One Hetzner Cloud worker node (Ubuntu 24.04, cpx22) with kubeadm bootstrap
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
+See [`docs/examples/my-cluster.yaml`](docs/examples/my-cluster.yaml) for the full manifest. Edit the SSH key name and cluster name before applying.
+
+### 5. Access the cluster
 
 ```sh
-kubectl delete -k config/samples/
+clusterctl get kubeconfig my-cluster > my-cluster.kubeconfig
+kubectl --kubeconfig my-cluster.kubeconfig get nodes
 ```
 
-**Delete the APIs(CRDs) from the cluster:**
+## Development
 
 ```sh
-make uninstall
+make build          # generate manifests, deepcopy, format, vet, compile
+make test           # unit tests with envtest
+make run            # run controller locally against current kubeconfig
+make lint           # golangci-lint
+make manifests      # regenerate CRDs and RBAC
+make release IMG=<registry>/capi-noplane:<tag>  # build clusterctl release artifacts
 ```
-
-**UnDeploy the controller from the cluster:**
-
-```sh
-make undeploy
-```
-
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/capi-noplane:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/capi-noplane/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
 
@@ -132,4 +106,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
