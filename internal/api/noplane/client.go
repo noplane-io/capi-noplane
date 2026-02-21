@@ -25,7 +25,7 @@ type ClientFactory func(apiKey string) (ClientInterface, error)
 
 // Client is the HTTP client for the noplane.io API.
 type Client struct {
-	client  *v1.ClientWithResponses
+	client *v1.ClientWithResponses
 }
 
 // NewClient creates a new noplane.io API client.
