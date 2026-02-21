@@ -33,9 +33,9 @@ type Client struct {
 
 // NewClient creates a new noplane.io API client.
 func NewClient(apiKey string) (ClientInterface, error) {
-	client, err := v1.NewClientWithResponses("https://api.noplane.io/v1",
+	client, err := v1.NewClientWithResponses("https://api.noplane.io/api/v1/",
 		v1.WithRequestEditorFn(func(ctx context.Context, req *http.Request) error {
-			req.Header.Set("Authorization", apiKey)
+			req.Header.Set("Authorization", "Bearer "+apiKey)
 
 			return nil
 		}))
@@ -177,6 +177,8 @@ func (c *Client) listTenants(ctx context.Context) ([]v1.Tenant, error) {
 }
 
 // tenantToPlane converts an API Tenant to our internal Plane type.
+// The noplane.io API has no explicit status field; hostname presence is the
+// readiness signal — it is only populated once the API server is reachable.
 func tenantToPlane(t *v1.Tenant) (*Plane, error) {
 	plane := &Plane{
 		ID:     t.Id,
@@ -190,6 +192,7 @@ func tenantToPlane(t *v1.Tenant) (*Plane, error) {
 
 	switch {
 	case t.Hostname != nil:
+		plane.Status = "ready"
 		plane.Endpoint = Endpoint{
 			Host: *t.Hostname,
 			Port: 6443,
