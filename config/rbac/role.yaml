@@ -26,7 +26,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - controlplane.noplane.io
+  - controlplane.cluster.x-k8s.io
   resources:
   - noplanecontrolplanes
   - noplanecontrolplanetemplates
@@ -39,14 +39,14 @@ rules:
   - update
   - watch
 - apiGroups:
-  - controlplane.noplane.io
+  - controlplane.cluster.x-k8s.io
   resources:
   - noplanecontrolplanes/finalizers
   - noplanecontrolplanetemplates/finalizers
   verbs:
   - update
 - apiGroups:
-  - controlplane.noplane.io
+  - controlplane.cluster.x-k8s.io
   resources:
   - noplanecontrolplanes/status
   - noplanecontrolplanetemplates/status

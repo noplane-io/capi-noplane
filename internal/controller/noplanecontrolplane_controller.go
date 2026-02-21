@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	noplaneFinalizer = "controlplane.noplane.io/finalizer"
+	noplaneFinalizer = "controlplane.cluster.x-k8s.io/finalizer"
 	fieldOwner       = "noplane-controlplane-controller"
 )
 
@@ -55,9 +55,9 @@ type NoPlaneControlPlaneReconciler struct {
 	ClientFactory noplane.ClientFactory
 }
 
-// +kubebuilder:rbac:groups=controlplane.noplane.io,resources=noplanecontrolplanes,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=controlplane.noplane.io,resources=noplanecontrolplanes/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=controlplane.noplane.io,resources=noplanecontrolplanes/finalizers,verbs=update
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=noplanecontrolplanes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=noplanecontrolplanes/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=noplanecontrolplanes/finalizers,verbs=update
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 

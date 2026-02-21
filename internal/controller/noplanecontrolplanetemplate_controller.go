@@ -33,9 +33,9 @@ type NoPlaneControlPlaneTemplateReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=controlplane.noplane.io,resources=noplanecontrolplanetemplates,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=controlplane.noplane.io,resources=noplanecontrolplanetemplates/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=controlplane.noplane.io,resources=noplanecontrolplanetemplates/finalizers,verbs=update
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=noplanecontrolplanetemplates,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=noplanecontrolplanetemplates/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=noplanecontrolplanetemplates/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.

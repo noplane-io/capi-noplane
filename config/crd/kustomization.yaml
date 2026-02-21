@@ -2,8 +2,8 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
-- bases/controlplane.noplane.io_noplanecontrolplanes.yaml
-- bases/controlplane.noplane.io_noplanecontrolplanetemplates.yaml
+- bases/controlplane.cluster.x-k8s.io_noplanecontrolplanes.yaml
+- bases/controlplane.cluster.x-k8s.io_noplanecontrolplanetemplates.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 # CAPI contract version labels required by the CAPI core controller.
