@@ -24,10 +24,7 @@ type ClientInterface interface {
 type ClientFactory func(apiKey string) (ClientInterface, error)
 
 // Client is the HTTP client for the noplane.io API.
-// TODO: Implement the HTTP methods against https://api.noplane.io/v1.
 type Client struct {
-	apiKey  string
-	baseURL string
 	client  *v1.ClientWithResponses
 }
 
@@ -44,7 +41,6 @@ func NewClient(apiKey string) (ClientInterface, error) {
 	}
 
 	return &Client{
-		apiKey: apiKey,
 		client: client,
 	}, nil
 }
@@ -192,6 +188,7 @@ func tenantToPlane(t *v1.Tenant) (*Plane, error) {
 
 	switch {
 	case t.Hostname != nil:
+		// TODO: add a status in the API.
 		plane.Status = "ready"
 		plane.Endpoint = Endpoint{
 			Host: *t.Hostname,
