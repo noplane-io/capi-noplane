@@ -20,7 +20,7 @@ Add the NoPlane provider to `~/.cluster-api/clusterctl.yaml`:
 ```yaml
 providers:
   - name: "noplane"
-    url: "https://github.com/noplane-io/capi-noplane/releases/latest/control-plane-components.yaml"
+    url: "https://github.com/noplane-io/capi-noplane/releases/v{VERSION}/control-plane-components.yaml"
     type: "ControlPlaneProvider"
 ```
 
