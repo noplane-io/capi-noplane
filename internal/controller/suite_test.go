@@ -265,6 +265,15 @@ func cleanupObjects(ctx context.Context, objs ...client.Object) {
 	}
 }
 
+// cleanupTestSecrets removes the kubeconfig and CA secrets that reconcileNormal
+// creates as side effects, keyed by the cluster name.
+func cleanupTestSecrets(ctx context.Context, clusterName, namespace string) {
+	cleanupObjects(ctx,
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: clusterName + "-kubeconfig", Namespace: namespace}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: clusterName + "-ca", Namespace: namespace}},
+	)
+}
+
 // getFirstFoundEnvTestBinaryDir locates the first binary in the specified path.
 // ENVTEST-based tests depend on specific binaries, usually located in paths set by
 // controller-runtime. When running tests directly (e.g., via an IDE) without using

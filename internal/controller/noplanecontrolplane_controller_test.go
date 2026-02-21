@@ -40,17 +40,9 @@ import (
 
 var _ = Describe("NoPlaneControlPlane Controller", func() {
 
-	// Each test group uses unique resource names to avoid cross-test collisions.
-	// We use a namespace counter to isolate groups.
+	const ns = "default"
 
 	Context("Reconcile entry paths", func() {
-		const (
-			ncpName    = "entry-ncp"
-			ns         = "default"
-			clusterNm  = "entry-cluster"
-			credSecret = "entry-creds"
-		)
-
 		It("should return nil when the resource does not exist", func() {
 			fakeAPI := fakeclient.NewClient()
 			r := makeReconciler(fakeAPI)
@@ -69,7 +61,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 				Spec: controlplanev1alpha1.NoPlaneControlPlaneSpec{
 					Version: "v1.29.2",
 					CredentialsSecretRef: corev1.SecretReference{
-						Name: credSecret, Namespace: ns,
+						Name: "no-owner-creds", Namespace: ns,
 					},
 				},
 			}
@@ -90,7 +82,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 			cluster.Spec.Paused = ptr.To(true)
 			Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
 
-			ncp := makeNCP(ctx, "paused-ncp", ns, cluster, credSecret)
+			ncp := makeNCP(ctx, "paused-ncp", ns, cluster, "paused-creds")
 			addFinalizer(ctx, ncp)
 			makeCredSecret(ctx, "paused-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
@@ -106,12 +98,13 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 		It("should skip reconciliation when the NCP has the paused annotation", func() {
 			cluster := makeCluster(ctx, "ncp-paused-cluster", ns)
-			ncp := makeNCP(ctx, "ncp-paused-ncp", ns, cluster, credSecret, func(n *controlplanev1alpha1.NoPlaneControlPlane) {
+			ncp := makeNCP(ctx, "ncp-paused-ncp", ns, cluster, "ncp-paused-creds", func(n *controlplanev1alpha1.NoPlaneControlPlane) {
 				n.Annotations = map[string]string{
 					clusterv1.PausedAnnotation: "true",
 				}
 			})
 			addFinalizer(ctx, ncp)
+			makeCredSecret(ctx, "ncp-paused-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -125,7 +118,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 		It("should add the finalizer on first reconcile and short-circuit", func() {
 			cluster := makeCluster(ctx, "fin-cluster", ns)
-			ncp := makeNCP(ctx, "fin-ncp", ns, cluster, credSecret)
+			ncp := makeNCP(ctx, "fin-ncp", ns, cluster, "fin-creds")
 			makeCredSecret(ctx, "fin-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
 
@@ -202,18 +195,19 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal happy path", func() {
 		It("should create plane, set status, create secrets, and requeue 60s", func() {
-			cluster := makeCluster(ctx, "happy-cluster", "default")
-			ncp := makeNCP(ctx, "happy-ncp", "default", cluster, "happy-creds")
+			cluster := makeCluster(ctx, "happy-cluster", ns)
+			ncp := makeNCP(ctx, "happy-ncp", ns, cluster, "happy-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "happy-creds", "default", "test-key")
+			makeCredSecret(ctx, "happy-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
+			defer cleanupTestSecrets(ctx, cluster.Name, ns)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
 			r := makeReconciler(fakeAPI)
 
 			result, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(Equal(60 * time.Second))
@@ -221,7 +215,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			// Verify status
 			updated := &controlplanev1alpha1.NoPlaneControlPlane{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: "default"}, updated)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: ns}, updated)).To(Succeed())
 			Expect(updated.Status.PlaneID).To(Equal("fake-np-id"))
 			Expect(updated.Status.Ready).To(BeTrue())
 			Expect(updated.Status.Initialized).To(BeTrue())
@@ -230,7 +224,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 			// Verify kubeconfig secret
 			kubeconfigSecret := &corev1.Secret{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name: cluster.Name + "-kubeconfig", Namespace: "default",
+				Name: cluster.Name + "-kubeconfig", Namespace: ns,
 			}, kubeconfigSecret)).To(Succeed())
 			Expect(kubeconfigSecret.Data["value"]).To(Equal(testKubeconfig))
 			Expect(kubeconfigSecret.Labels[clusterv1.ClusterNameLabel]).To(Equal(cluster.Name))
@@ -238,28 +232,25 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 			// Verify CA secret
 			caSecret := &corev1.Secret{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name: cluster.Name + "-ca", Namespace: "default",
+				Name: cluster.Name + "-ca", Namespace: ns,
 			}, caSecret)).To(Succeed())
 			Expect(caSecret.Data["tls.crt"]).To(Equal(testCACertPEM))
 			Expect(caSecret.Data["tls.key"]).NotTo(BeEmpty())
 			Expect(caSecret.Type).To(Equal(clusterv1.ClusterSecretType))
 
 			// Verify endpoint was synced
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: "default"}, updated)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: ns}, updated)).To(Succeed())
 			Expect(updated.Spec.ControlPlaneEndpoint.Host).To(Equal("fake.noplane.io"))
 			Expect(updated.Spec.ControlPlaneEndpoint.Port).To(Equal(int32(6443)))
-
-			// Cleanup created secrets
-			cleanupObjects(ctx, kubeconfigSecret, caSecret)
 		})
 	})
 
 	Context("reconcileNormal plane not ready", func() {
 		It("should requeue after 15s when the plane is not ready", func() {
-			cluster := makeCluster(ctx, "notready-cluster", "default")
-			ncp := makeNCP(ctx, "notready-ncp", "default", cluster, "notready-creds")
+			cluster := makeCluster(ctx, "notready-cluster", ns)
+			ncp := makeNCP(ctx, "notready-ncp", ns, cluster, "notready-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "notready-creds", "default", "test-key")
+			makeCredSecret(ctx, "notready-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -279,7 +270,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			result, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(Equal(15 * time.Second))
@@ -289,10 +280,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal version mismatch", func() {
 		It("should call UpdatePlane and requeue after 30s", func() {
-			cluster := makeCluster(ctx, "version-cluster", "default")
-			ncp := makeNCP(ctx, "version-ncp", "default", cluster, "version-creds")
+			cluster := makeCluster(ctx, "version-cluster", ns)
+			ncp := makeNCP(ctx, "version-ncp", ns, cluster, "version-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "version-creds", "default", "test-key")
+			makeCredSecret(ctx, "version-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -312,7 +303,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			result, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
@@ -322,11 +313,12 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal 409 conflict on create", func() {
 		It("should fall back to GetPlaneByName on 409 and adopt the existing plane", func() {
-			cluster := makeCluster(ctx, "conflict-cluster", "default")
-			ncp := makeNCP(ctx, "conflict-ncp", "default", cluster, "conflict-creds")
+			cluster := makeCluster(ctx, "conflict-cluster", ns)
+			ncp := makeNCP(ctx, "conflict-ncp", ns, cluster, "conflict-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "conflict-creds", "default", "test-key")
+			makeCredSecret(ctx, "conflict-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
+			defer cleanupTestSecrets(ctx, cluster.Name, ns)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
@@ -345,7 +337,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			result, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(Equal(60 * time.Second))
@@ -353,33 +345,22 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 			Expect(fakeAPI.GetByNameCallCount).To(Equal(1))
 
 			updated := &controlplanev1alpha1.NoPlaneControlPlane{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: "default"}, updated)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: ns}, updated)).To(Succeed())
 			Expect(updated.Status.PlaneID).To(Equal("adopted-id"))
-
-			// Cleanup created secrets
-			cleanupObjects(ctx,
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: cluster.Name + "-kubeconfig", Namespace: "default"}},
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: cluster.Name + "-ca", Namespace: "default"}},
-			)
 		})
 	})
 
 	Context("reconcileNormal GetPlane error", func() {
 		It("should return error when GetPlane fails", func() {
-			cluster := makeCluster(ctx, "geterr-cluster", "default")
-			ncp := makeNCP(ctx, "geterr-ncp", "default", cluster, "geterr-creds")
+			cluster := makeCluster(ctx, "geterr-cluster", ns)
+			ncp := makeNCP(ctx, "geterr-ncp", ns, cluster, "geterr-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "geterr-creds", "default", "test-key")
+			makeCredSecret(ctx, "geterr-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
-			// Let CreatePlane succeed, then fail on GetPlane.
-			// After CreatePlane, the plane is in fakeAPI.Planes. We need to
-			// set GetErr which is checked after the status update.
-			// However GetErr is checked before looking up in the map, so we
-			// can set it after the create by using a two-phase approach.
-			// Simpler: pre-set status.PlaneID so resolvePlaneID skips create,
+			// Pre-set status.PlaneID so resolvePlaneID skips create,
 			// then GetErr triggers on the subsequent GetPlane call.
 			ncp.Status.PlaneID = "some-id"
 			Expect(k8sClient.Status().Update(ctx, ncp)).To(Succeed())
@@ -387,7 +368,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("getting plane"))
@@ -396,13 +377,14 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal brownfield adoption", func() {
 		It("should use spec.PlaneID without calling CreatePlane", func() {
-			cluster := makeCluster(ctx, "brown-cluster", "default")
-			ncp := makeNCP(ctx, "brown-ncp", "default", cluster, "brown-creds", func(n *controlplanev1alpha1.NoPlaneControlPlane) {
+			cluster := makeCluster(ctx, "brown-cluster", ns)
+			ncp := makeNCP(ctx, "brown-ncp", ns, cluster, "brown-creds", func(n *controlplanev1alpha1.NoPlaneControlPlane) {
 				n.Spec.PlaneID = "pre-existing-id"
 			})
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "brown-creds", "default", "test-key")
+			makeCredSecret(ctx, "brown-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
+			defer cleanupTestSecrets(ctx, cluster.Name, ns)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
@@ -416,28 +398,23 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			result, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(Equal(60 * time.Second))
 			Expect(fakeAPI.CreateCallCount).To(Equal(0))
 			Expect(fakeAPI.GetCallCount).To(Equal(1))
-
-			// Cleanup created secrets
-			cleanupObjects(ctx,
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: cluster.Name + "-kubeconfig", Namespace: "default"}},
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: cluster.Name + "-ca", Namespace: "default"}},
-			)
 		})
 	})
 
 	Context("reconcileNormal crash recovery", func() {
 		It("should use status.PlaneID without calling CreatePlane", func() {
-			cluster := makeCluster(ctx, "crash-cluster", "default")
-			ncp := makeNCP(ctx, "crash-ncp", "default", cluster, "crash-creds")
+			cluster := makeCluster(ctx, "crash-cluster", ns)
+			ncp := makeNCP(ctx, "crash-ncp", ns, cluster, "crash-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "crash-creds", "default", "test-key")
+			makeCredSecret(ctx, "crash-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
+			defer cleanupTestSecrets(ctx, cluster.Name, ns)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
@@ -454,53 +431,46 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			result, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(Equal(60 * time.Second))
 			Expect(fakeAPI.CreateCallCount).To(Equal(0))
 			Expect(fakeAPI.GetCallCount).To(Equal(1))
-
-			// Cleanup created secrets
-			cleanupObjects(ctx,
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: cluster.Name + "-kubeconfig", Namespace: "default"}},
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: cluster.Name + "-ca", Namespace: "default"}},
-			)
 		})
 	})
 
 	Context("reconcileNormal kubeconfig secret update", func() {
 		It("should update an existing kubeconfig secret with new data", func() {
-			cluster := makeCluster(ctx, "kcupd-cluster", "default")
-			ncp := makeNCP(ctx, "kcupd-ncp", "default", cluster, "kcupd-creds")
+			cluster := makeCluster(ctx, "kcupd-cluster", ns)
+			ncp := makeNCP(ctx, "kcupd-ncp", ns, cluster, "kcupd-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "kcupd-creds", "default", "test-key")
+			makeCredSecret(ctx, "kcupd-creds", ns, "test-key")
+			defer cleanupObjects(ctx, cluster, ncp)
+			defer cleanupTestSecrets(ctx, cluster.Name, ns)
 
 			// Pre-create the kubeconfig secret with old data
 			oldKCSecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      cluster.Name + "-kubeconfig",
-					Namespace: "default",
+					Namespace: ns,
 				},
 				Data: map[string][]byte{"value": []byte("old-kubeconfig")},
 			}
 			Expect(k8sClient.Create(ctx, oldKCSecret)).To(Succeed())
-			defer cleanupObjects(ctx, cluster, ncp, oldKCSecret,
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: cluster.Name + "-ca", Namespace: "default"}},
-			)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedSecret := &corev1.Secret{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name: cluster.Name + "-kubeconfig", Namespace: "default",
+				Name: cluster.Name + "-kubeconfig", Namespace: ns,
 			}, updatedSecret)).To(Succeed())
 			Expect(updatedSecret.Data["value"]).To(Equal(testKubeconfig))
 		})
@@ -508,16 +478,18 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal CA secret skip", func() {
 		It("should not regenerate CA secret if tls.key is already present", func() {
-			cluster := makeCluster(ctx, "caskip-cluster", "default")
-			ncp := makeNCP(ctx, "caskip-ncp", "default", cluster, "caskip-creds")
+			cluster := makeCluster(ctx, "caskip-cluster", ns)
+			ncp := makeNCP(ctx, "caskip-ncp", ns, cluster, "caskip-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "caskip-creds", "default", "test-key")
+			makeCredSecret(ctx, "caskip-creds", ns, "test-key")
+			defer cleanupObjects(ctx, cluster, ncp)
+			defer cleanupTestSecrets(ctx, cluster.Name, ns)
 
 			// Pre-create the CA secret with existing tls.key
 			existingCASecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      cluster.Name + "-ca",
-					Namespace: "default",
+					Namespace: ns,
 				},
 				Data: map[string][]byte{
 					"tls.crt": []byte("existing-cert"),
@@ -525,23 +497,20 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, existingCASecret)).To(Succeed())
-			defer cleanupObjects(ctx, cluster, ncp, existingCASecret,
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: cluster.Name + "-kubeconfig", Namespace: "default"}},
-			)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify the CA secret was NOT regenerated
 			caSecret := &corev1.Secret{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name: cluster.Name + "-ca", Namespace: "default",
+				Name: cluster.Name + "-ca", Namespace: ns,
 			}, caSecret)).To(Succeed())
 			Expect(caSecret.Data["tls.key"]).To(Equal([]byte("existing-key")))
 		})
@@ -549,10 +518,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal GetKubeconfig error", func() {
 		It("should return error when GetKubeconfig fails", func() {
-			cluster := makeCluster(ctx, "kcerr-cluster", "default")
-			ncp := makeNCP(ctx, "kcerr-ncp", "default", cluster, "kcerr-creds")
+			cluster := makeCluster(ctx, "kcerr-cluster", ns)
+			ncp := makeNCP(ctx, "kcerr-ncp", ns, cluster, "kcerr-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "kcerr-creds", "default", "test-key")
+			makeCredSecret(ctx, "kcerr-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -571,7 +540,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("fetching kubeconfig"))
@@ -580,10 +549,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileDelete", func() {
 		It("should remove finalizer without calling DeletePlane when no planeID", func() {
-			cluster := makeCluster(ctx, "delnoid-cluster", "default")
-			ncp := makeNCP(ctx, "delnoid-ncp", "default", cluster, "delnoid-creds")
+			cluster := makeCluster(ctx, "delnoid-cluster", ns)
+			ncp := makeNCP(ctx, "delnoid-ncp", ns, cluster, "delnoid-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "delnoid-creds", "default", "test-key")
+			makeCredSecret(ctx, "delnoid-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster)
 
 			// Trigger deletion
@@ -593,22 +562,22 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 			fakeAPI.Kubeconfig = testKubeconfig
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fakeAPI.DeleteCallCount).To(Equal(0))
 
 			// Object should be gone
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: ns},
 				&controlplanev1alpha1.NoPlaneControlPlane{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 
 		It("should call DeletePlane and remove finalizer when planeID is set", func() {
-			cluster := makeCluster(ctx, "delok-cluster", "default")
-			ncp := makeNCP(ctx, "delok-ncp", "default", cluster, "delok-creds")
+			cluster := makeCluster(ctx, "delok-cluster", ns)
+			ncp := makeNCP(ctx, "delok-ncp", ns, cluster, "delok-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "delok-creds", "default", "test-key")
+			makeCredSecret(ctx, "delok-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster)
 
 			fakeAPI := fakeclient.NewClient()
@@ -629,22 +598,22 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fakeAPI.DeleteCallCount).To(Equal(1))
 
 			// Object should be gone
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: ns},
 				&controlplanev1alpha1.NoPlaneControlPlane{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 
 		It("should tolerate 404 from DeletePlane and remove finalizer", func() {
-			cluster := makeCluster(ctx, "del404-cluster", "default")
-			ncp := makeNCP(ctx, "del404-ncp", "default", cluster, "del404-creds")
+			cluster := makeCluster(ctx, "del404-cluster", ns)
+			ncp := makeNCP(ctx, "del404-ncp", ns, cluster, "del404-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "del404-creds", "default", "test-key")
+			makeCredSecret(ctx, "del404-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster)
 
 			fakeAPI := fakeclient.NewClient()
@@ -659,22 +628,22 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fakeAPI.DeleteCallCount).To(Equal(1))
 
 			// Object should be gone
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: ns},
 				&controlplanev1alpha1.NoPlaneControlPlane{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 
 		It("should return error and keep finalizer when DeletePlane fails with non-404", func() {
-			cluster := makeCluster(ctx, "delerr-cluster", "default")
-			ncp := makeNCP(ctx, "delerr-ncp", "default", cluster, "delerr-creds")
+			cluster := makeCluster(ctx, "delerr-cluster", ns)
+			ncp := makeNCP(ctx, "delerr-ncp", ns, cluster, "delerr-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "delerr-creds", "default", "test-key")
+			makeCredSecret(ctx, "delerr-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -689,24 +658,24 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("deleting plane"))
 
 			// Object should still exist with finalizer (deletion blocked)
 			remaining := &controlplanev1alpha1.NoPlaneControlPlane{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: "default"}, remaining)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ncp.Name, Namespace: ns}, remaining)).To(Succeed())
 			Expect(controllerutil.ContainsFinalizer(remaining, noplaneFinalizer)).To(BeTrue())
 		})
 	})
 
 	Context("reconcileNormal CreatePlane non-conflict error", func() {
 		It("should return error when CreatePlane fails with a non-409 error", func() {
-			cluster := makeCluster(ctx, "createerr-cluster", "default")
-			ncp := makeNCP(ctx, "createerr-ncp", "default", cluster, "createerr-creds")
+			cluster := makeCluster(ctx, "createerr-cluster", ns)
+			ncp := makeNCP(ctx, "createerr-ncp", ns, cluster, "createerr-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "createerr-creds", "default", "test-key")
+			makeCredSecret(ctx, "createerr-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -714,7 +683,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("creating plane"))
@@ -723,10 +692,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal UpdatePlane error", func() {
 		It("should return error when UpdatePlane fails", func() {
-			cluster := makeCluster(ctx, "upderr-cluster", "default")
-			ncp := makeNCP(ctx, "upderr-ncp", "default", cluster, "upderr-creds")
+			cluster := makeCluster(ctx, "upderr-cluster", ns)
+			ncp := makeNCP(ctx, "upderr-ncp", ns, cluster, "upderr-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "upderr-creds", "default", "test-key")
+			makeCredSecret(ctx, "upderr-creds", ns, "test-key")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -745,7 +714,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("upgrading plane"))
@@ -754,16 +723,18 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal CA secret edge cases", func() {
 		It("should update existing CA secret that has no tls.key", func() {
-			cluster := makeCluster(ctx, "caupd-cluster", "default")
-			ncp := makeNCP(ctx, "caupd-ncp", "default", cluster, "caupd-creds")
+			cluster := makeCluster(ctx, "caupd-cluster", ns)
+			ncp := makeNCP(ctx, "caupd-ncp", ns, cluster, "caupd-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "caupd-creds", "default", "test-key")
+			makeCredSecret(ctx, "caupd-creds", ns, "test-key")
+			defer cleanupObjects(ctx, cluster, ncp)
+			defer cleanupTestSecrets(ctx, cluster.Name, ns)
 
 			// Pre-create a CA secret WITHOUT tls.key (should be updated, not skipped)
 			existingCASecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      cluster.Name + "-ca",
-					Namespace: "default",
+					Namespace: ns,
 				},
 				Type: clusterv1.ClusterSecretType,
 				Data: map[string][]byte{
@@ -771,36 +742,72 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, existingCASecret)).To(Succeed())
-			defer cleanupObjects(ctx, cluster, ncp, existingCASecret,
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: cluster.Name + "-kubeconfig", Namespace: "default"}},
-			)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify the CA secret was updated with real CA and a generated tls.key
 			caSecret := &corev1.Secret{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name: cluster.Name + "-ca", Namespace: "default",
+				Name: cluster.Name + "-ca", Namespace: ns,
 			}, caSecret)).To(Succeed())
 			Expect(caSecret.Data["tls.crt"]).To(Equal(testCACertPEM))
 			Expect(caSecret.Data["tls.key"]).NotTo(BeEmpty())
 		})
 
-		It("should return error when kubeconfig has no clusters", func() {
-			cluster := makeCluster(ctx, "noclusters-cluster", "default")
-			ncp := makeNCP(ctx, "noclusters-ncp", "default", cluster, "noclusters-creds")
+		It("should recreate CA secret when existing has wrong type", func() {
+			cluster := makeCluster(ctx, "catype-cluster", ns)
+			ncp := makeNCP(ctx, "catype-ncp", ns, cluster, "catype-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "noclusters-creds", "default", "test-key")
-			defer cleanupObjects(ctx, cluster, ncp,
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: cluster.Name + "-kubeconfig", Namespace: "default"}},
-			)
+			makeCredSecret(ctx, "catype-creds", ns, "test-key")
+			defer cleanupObjects(ctx, cluster, ncp)
+			defer cleanupTestSecrets(ctx, cluster.Name, ns)
+
+			// Pre-create a CA secret with wrong type (Opaque instead of ClusterSecretType)
+			wrongTypeSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      cluster.Name + "-ca",
+					Namespace: ns,
+				},
+				Type: corev1.SecretTypeOpaque,
+				Data: map[string][]byte{
+					"tls.crt": []byte("old-cert"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, wrongTypeSecret)).To(Succeed())
+
+			fakeAPI := fakeclient.NewClient()
+			fakeAPI.Kubeconfig = testKubeconfig
+
+			r := makeReconciler(fakeAPI)
+			_, err := r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify the CA secret was recreated with the correct type
+			caSecret := &corev1.Secret{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: cluster.Name + "-ca", Namespace: ns,
+			}, caSecret)).To(Succeed())
+			Expect(caSecret.Type).To(Equal(clusterv1.ClusterSecretType))
+			Expect(caSecret.Data["tls.crt"]).To(Equal(testCACertPEM))
+			Expect(caSecret.Data["tls.key"]).NotTo(BeEmpty())
+		})
+
+		It("should return error when kubeconfig has no clusters", func() {
+			cluster := makeCluster(ctx, "noclusters-cluster", ns)
+			ncp := makeNCP(ctx, "noclusters-ncp", ns, cluster, "noclusters-creds")
+			addFinalizer(ctx, ncp)
+			makeCredSecret(ctx, "noclusters-creds", ns, "test-key")
+			defer cleanupObjects(ctx, cluster, ncp)
+			defer cleanupTestSecrets(ctx, cluster.Name, ns)
 
 			// Build a kubeconfig with no cluster entries
 			emptyKC := clientcmdapi.NewConfig()
@@ -815,20 +822,19 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("kubeconfig contains no clusters"))
 		})
 
 		It("should return error when kubeconfig cluster has no CA data", func() {
-			cluster := makeCluster(ctx, "noca-cluster", "default")
-			ncp := makeNCP(ctx, "noca-ncp", "default", cluster, "noca-creds")
+			cluster := makeCluster(ctx, "noca-cluster", ns)
+			ncp := makeNCP(ctx, "noca-ncp", ns, cluster, "noca-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "noca-creds", "default", "test-key")
-			defer cleanupObjects(ctx, cluster, ncp,
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: cluster.Name + "-kubeconfig", Namespace: "default"}},
-			)
+			makeCredSecret(ctx, "noca-creds", ns, "test-key")
+			defer cleanupObjects(ctx, cluster, ncp)
+			defer cleanupTestSecrets(ctx, cluster.Name, ns)
 
 			// Build a kubeconfig with a cluster but no CA data
 			noCAKC := clientcmdapi.NewConfig()
@@ -846,7 +852,7 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 			r := makeReconciler(fakeAPI)
 			_, err := r.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: "default"},
+				NamespacedName: types.NamespacedName{Name: ncp.Name, Namespace: ns},
 			})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("no certificate-authority-data"))

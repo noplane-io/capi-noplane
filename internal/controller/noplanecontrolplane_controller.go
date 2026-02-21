@@ -362,9 +362,17 @@ func (r *NoPlaneControlPlaneReconciler) reconcileCASecret(
 		return r.Create(ctx, secret)
 	}
 
+	// Secret type is immutable after creation. If the existing secret has a
+	// different type we must delete and recreate it.
+	if existing.Type != secret.Type {
+		if err := r.Delete(ctx, existing); err != nil {
+			return fmt.Errorf("deleting CA secret with wrong type: %w", err)
+		}
+		return r.Create(ctx, secret)
+	}
+
 	existing.Data = secret.Data
 	existing.Labels = secret.Labels
-	existing.Type = secret.Type
 	return r.Update(ctx, existing)
 }
 
