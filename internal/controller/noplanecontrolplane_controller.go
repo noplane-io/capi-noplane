@@ -87,7 +87,10 @@ func (r *NoPlaneControlPlaneReconciler) Reconcile(ctx context.Context, req ctrl.
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("fetching API key: %w", err)
 	}
-	apiClient := r.ClientFactory(apiKey)
+	apiClient, err := r.ClientFactory(apiKey)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("creating API client: %w", err)
+	}
 
 	if !ncp.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, &ncp, apiClient)

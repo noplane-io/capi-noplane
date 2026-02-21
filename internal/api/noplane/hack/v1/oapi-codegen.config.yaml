@@ -1,0 +1,8 @@
+# backend/internal/api/v1/oapi-codegen.config.yaml
+output: api.gen.go
+package: v1
+generate:
+  - types
+  - chi-server
+  - strict-server
+  - client
