@@ -145,13 +145,15 @@ func generateTestKubeconfig() {
 	testCACertPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 
 	kubeconfigObj := clientcmdapi.NewConfig()
-	kubeconfigObj.Clusters["test"] = &clientcmdapi.Cluster{
+
+	const contextKey = "test"
+	kubeconfigObj.Clusters[contextKey] = &clientcmdapi.Cluster{
 		Server:                   "https://fake.noplane.io:6443",
 		CertificateAuthorityData: testCACertPEM,
 	}
 	kubeconfigObj.AuthInfos["admin"] = &clientcmdapi.AuthInfo{}
-	kubeconfigObj.Contexts["test"] = &clientcmdapi.Context{Cluster: "test", AuthInfo: "admin"}
-	kubeconfigObj.CurrentContext = "test"
+	kubeconfigObj.Contexts[contextKey] = &clientcmdapi.Context{Cluster: contextKey, AuthInfo: "admin"}
+	kubeconfigObj.CurrentContext = contextKey
 
 	testKubeconfig, err = clientcmd.Write(*kubeconfigObj)
 	Expect(err).NotTo(HaveOccurred())
@@ -171,30 +173,28 @@ func capiCRDPath() string {
 	return filepath.Join(mod.Dir, "config", "crd", "bases")
 }
 
-// --- Shared test helpers ---
-
-func makeCluster(ctx context.Context, name, namespace string) *clusterv1.Cluster {
+func makeCluster(ctx context.Context, name string) *clusterv1.Cluster {
 	// Use Unstructured to create the Cluster because the CAPI v1beta2 CRD
 	// requires "spec" in the JSON body, but the Go struct's omitzero tags
 	// omit it when all fields are zero-valued.
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(clusterv1.GroupVersion.WithKind("Cluster"))
 	u.SetName(name)
-	u.SetNamespace(namespace)
-	u.Object["spec"] = map[string]interface{}{
+	u.SetNamespace("default")
+	u.Object["spec"] = map[string]any{
 		"paused": false,
 	}
 	Expect(k8sClient.Create(ctx, u)).To(Succeed())
 
 	// Read back as typed object so callers get a proper *Cluster with UID set.
 	cluster := &clusterv1.Cluster{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, cluster)).To(Succeed())
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, cluster)).To(Succeed())
 	return cluster
 }
 
 func makeNCP(
 	ctx context.Context,
-	name, namespace string,
+	name string,
 	cluster *clusterv1.Cluster,
 	credSecretName string,
 	opts ...func(*controlplanev1alpha1.NoPlaneControlPlane),
@@ -202,7 +202,7 @@ func makeNCP(
 	ncp := &controlplanev1alpha1.NoPlaneControlPlane{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: "default",
 			Labels: map[string]string{
 				clusterv1.ClusterNameLabel: cluster.Name,
 			},
@@ -219,7 +219,7 @@ func makeNCP(
 			Version: "v1.29.2",
 			CredentialsSecretRef: corev1.SecretReference{
 				Name:      credSecretName,
-				Namespace: namespace,
+				Namespace: "default",
 			},
 		},
 	}
@@ -230,18 +230,17 @@ func makeNCP(
 	return ncp
 }
 
-func makeCredSecret(ctx context.Context, name, namespace, apiKey string) *corev1.Secret {
+func makeCredSecret(ctx context.Context, name string) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: "default",
 		},
 		Data: map[string][]byte{
-			"apiKey": []byte(apiKey),
+			"apiKey": []byte("test-key"),
 		},
 	}
 	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-	return secret
 }
 
 func makeReconciler(fakeAPI *fakeclient.Client) *NoPlaneControlPlaneReconciler {
@@ -267,10 +266,10 @@ func cleanupObjects(ctx context.Context, objs ...client.Object) {
 
 // cleanupTestSecrets removes the kubeconfig and CA secrets that reconcileNormal
 // creates as side effects, keyed by the cluster name.
-func cleanupTestSecrets(ctx context.Context, clusterName, namespace string) {
+func cleanupTestSecrets(ctx context.Context, clusterName string) {
 	cleanupObjects(ctx,
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: clusterName + "-kubeconfig", Namespace: namespace}},
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: clusterName + "-ca", Namespace: namespace}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: clusterName + "-kubeconfig", Namespace: "default"}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: clusterName + "-ca", Namespace: "default"}},
 	)
 }
 

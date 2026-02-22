@@ -78,13 +78,13 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should skip reconciliation when the cluster is paused", func() {
-			cluster := makeCluster(ctx, "paused-cluster", ns)
+			cluster := makeCluster(ctx, "paused-cluster")
 			cluster.Spec.Paused = ptr.To(true)
 			Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
 
-			ncp := makeNCP(ctx, "paused-ncp", ns, cluster, "paused-creds")
+			ncp := makeNCP(ctx, "paused-ncp", cluster, "paused-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "paused-creds", ns, "test-key")
+			makeCredSecret(ctx, "paused-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -97,14 +97,14 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should skip reconciliation when the NCP has the paused annotation", func() {
-			cluster := makeCluster(ctx, "ncp-paused-cluster", ns)
-			ncp := makeNCP(ctx, "ncp-paused-ncp", ns, cluster, "ncp-paused-creds", func(n *controlplanev1alpha1.NoPlaneControlPlane) {
+			cluster := makeCluster(ctx, "ncp-paused-cluster")
+			ncp := makeNCP(ctx, "ncp-paused-ncp", cluster, "ncp-paused-creds", func(n *controlplanev1alpha1.NoPlaneControlPlane) {
 				n.Annotations = map[string]string{
 					clusterv1.PausedAnnotation: "true",
 				}
 			})
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "ncp-paused-creds", ns, "test-key")
+			makeCredSecret(ctx, "ncp-paused-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -117,9 +117,9 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should add the finalizer on first reconcile and short-circuit", func() {
-			cluster := makeCluster(ctx, "fin-cluster", ns)
-			ncp := makeNCP(ctx, "fin-ncp", ns, cluster, "fin-creds")
-			makeCredSecret(ctx, "fin-creds", ns, "test-key")
+			cluster := makeCluster(ctx, "fin-cluster")
+			ncp := makeNCP(ctx, "fin-ncp", cluster, "fin-creds")
+			makeCredSecret(ctx, "fin-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -136,8 +136,8 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should return error when the credentials secret does not exist", func() {
-			cluster := makeCluster(ctx, "nosecret-cluster", ns)
-			ncp := makeNCP(ctx, "nosecret-ncp", ns, cluster, "nonexistent-secret")
+			cluster := makeCluster(ctx, "nosecret-cluster")
+			ncp := makeNCP(ctx, "nosecret-ncp", cluster, "nonexistent-secret")
 			addFinalizer(ctx, ncp)
 			defer cleanupObjects(ctx, cluster, ncp)
 
@@ -151,8 +151,8 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should return error when the credentials secret is missing the apiKey key", func() {
-			cluster := makeCluster(ctx, "badkey-cluster", ns)
-			ncp := makeNCP(ctx, "badkey-ncp", ns, cluster, "badkey-secret")
+			cluster := makeCluster(ctx, "badkey-cluster")
+			ncp := makeNCP(ctx, "badkey-ncp", cluster, "badkey-secret")
 			addFinalizer(ctx, ncp)
 
 			badSecret := &corev1.Secret{
@@ -172,10 +172,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should return error when ClientFactory fails", func() {
-			cluster := makeCluster(ctx, "factory-cluster", ns)
-			ncp := makeNCP(ctx, "factory-ncp", ns, cluster, "factory-creds")
+			cluster := makeCluster(ctx, "factory-cluster")
+			ncp := makeNCP(ctx, "factory-ncp", cluster, "factory-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "factory-creds", ns, "test-key")
+			makeCredSecret(ctx, "factory-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			r := &NoPlaneControlPlaneReconciler{
@@ -195,12 +195,12 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal happy path", func() {
 		It("should create plane, set status, create secrets, and requeue 60s", func() {
-			cluster := makeCluster(ctx, "happy-cluster", ns)
-			ncp := makeNCP(ctx, "happy-ncp", ns, cluster, "happy-creds")
+			cluster := makeCluster(ctx, "happy-cluster")
+			ncp := makeNCP(ctx, "happy-ncp", cluster, "happy-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "happy-creds", ns, "test-key")
+			makeCredSecret(ctx, "happy-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
-			defer cleanupTestSecrets(ctx, cluster.Name, ns)
+			defer cleanupTestSecrets(ctx, cluster.Name)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
@@ -247,10 +247,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal plane not ready", func() {
 		It("should requeue after 15s when the plane is not ready", func() {
-			cluster := makeCluster(ctx, "notready-cluster", ns)
-			ncp := makeNCP(ctx, "notready-ncp", ns, cluster, "notready-creds")
+			cluster := makeCluster(ctx, "notready-cluster")
+			ncp := makeNCP(ctx, "notready-ncp", cluster, "notready-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "notready-creds", ns, "test-key")
+			makeCredSecret(ctx, "notready-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -280,10 +280,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal version mismatch", func() {
 		It("should call UpdatePlane and requeue after 30s", func() {
-			cluster := makeCluster(ctx, "version-cluster", ns)
-			ncp := makeNCP(ctx, "version-ncp", ns, cluster, "version-creds")
+			cluster := makeCluster(ctx, "version-cluster")
+			ncp := makeNCP(ctx, "version-ncp", cluster, "version-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "version-creds", ns, "test-key")
+			makeCredSecret(ctx, "version-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -313,12 +313,12 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal 409 conflict on create", func() {
 		It("should fall back to GetPlaneByName on 409 and adopt the existing plane", func() {
-			cluster := makeCluster(ctx, "conflict-cluster", ns)
-			ncp := makeNCP(ctx, "conflict-ncp", ns, cluster, "conflict-creds")
+			cluster := makeCluster(ctx, "conflict-cluster")
+			ncp := makeNCP(ctx, "conflict-ncp", cluster, "conflict-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "conflict-creds", ns, "test-key")
+			makeCredSecret(ctx, "conflict-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
-			defer cleanupTestSecrets(ctx, cluster.Name, ns)
+			defer cleanupTestSecrets(ctx, cluster.Name)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
@@ -352,10 +352,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal GetPlane error", func() {
 		It("should return error when GetPlane fails", func() {
-			cluster := makeCluster(ctx, "geterr-cluster", ns)
-			ncp := makeNCP(ctx, "geterr-ncp", ns, cluster, "geterr-creds")
+			cluster := makeCluster(ctx, "geterr-cluster")
+			ncp := makeNCP(ctx, "geterr-ncp", cluster, "geterr-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "geterr-creds", ns, "test-key")
+			makeCredSecret(ctx, "geterr-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -377,14 +377,14 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal brownfield adoption", func() {
 		It("should use spec.PlaneID without calling CreatePlane", func() {
-			cluster := makeCluster(ctx, "brown-cluster", ns)
-			ncp := makeNCP(ctx, "brown-ncp", ns, cluster, "brown-creds", func(n *controlplanev1alpha1.NoPlaneControlPlane) {
+			cluster := makeCluster(ctx, "brown-cluster")
+			ncp := makeNCP(ctx, "brown-ncp", cluster, "brown-creds", func(n *controlplanev1alpha1.NoPlaneControlPlane) {
 				n.Spec.PlaneID = "pre-existing-id"
 			})
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "brown-creds", ns, "test-key")
+			makeCredSecret(ctx, "brown-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
-			defer cleanupTestSecrets(ctx, cluster.Name, ns)
+			defer cleanupTestSecrets(ctx, cluster.Name)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
@@ -409,12 +409,12 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal crash recovery", func() {
 		It("should use status.PlaneID without calling CreatePlane", func() {
-			cluster := makeCluster(ctx, "crash-cluster", ns)
-			ncp := makeNCP(ctx, "crash-ncp", ns, cluster, "crash-creds")
+			cluster := makeCluster(ctx, "crash-cluster")
+			ncp := makeNCP(ctx, "crash-ncp", cluster, "crash-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "crash-creds", ns, "test-key")
+			makeCredSecret(ctx, "crash-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
-			defer cleanupTestSecrets(ctx, cluster.Name, ns)
+			defer cleanupTestSecrets(ctx, cluster.Name)
 
 			fakeAPI := fakeclient.NewClient()
 			fakeAPI.Kubeconfig = testKubeconfig
@@ -442,12 +442,12 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal kubeconfig secret update", func() {
 		It("should update an existing kubeconfig secret with new data", func() {
-			cluster := makeCluster(ctx, "kcupd-cluster", ns)
-			ncp := makeNCP(ctx, "kcupd-ncp", ns, cluster, "kcupd-creds")
+			cluster := makeCluster(ctx, "kcupd-cluster")
+			ncp := makeNCP(ctx, "kcupd-ncp", cluster, "kcupd-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "kcupd-creds", ns, "test-key")
+			makeCredSecret(ctx, "kcupd-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
-			defer cleanupTestSecrets(ctx, cluster.Name, ns)
+			defer cleanupTestSecrets(ctx, cluster.Name)
 
 			// Pre-create the kubeconfig secret with old data
 			oldKCSecret := &corev1.Secret{
@@ -478,12 +478,12 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal CA secret skip", func() {
 		It("should not regenerate CA secret if tls.key is already present", func() {
-			cluster := makeCluster(ctx, "caskip-cluster", ns)
-			ncp := makeNCP(ctx, "caskip-ncp", ns, cluster, "caskip-creds")
+			cluster := makeCluster(ctx, "caskip-cluster")
+			ncp := makeNCP(ctx, "caskip-ncp", cluster, "caskip-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "caskip-creds", ns, "test-key")
+			makeCredSecret(ctx, "caskip-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
-			defer cleanupTestSecrets(ctx, cluster.Name, ns)
+			defer cleanupTestSecrets(ctx, cluster.Name)
 
 			// Pre-create the CA secret with existing tls.key
 			existingCASecret := &corev1.Secret{
@@ -518,10 +518,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal GetKubeconfig error", func() {
 		It("should return error when GetKubeconfig fails", func() {
-			cluster := makeCluster(ctx, "kcerr-cluster", ns)
-			ncp := makeNCP(ctx, "kcerr-ncp", ns, cluster, "kcerr-creds")
+			cluster := makeCluster(ctx, "kcerr-cluster")
+			ncp := makeNCP(ctx, "kcerr-ncp", cluster, "kcerr-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "kcerr-creds", ns, "test-key")
+			makeCredSecret(ctx, "kcerr-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -549,10 +549,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileDelete", func() {
 		It("should remove finalizer without calling DeletePlane when no planeID", func() {
-			cluster := makeCluster(ctx, "delnoid-cluster", ns)
-			ncp := makeNCP(ctx, "delnoid-ncp", ns, cluster, "delnoid-creds")
+			cluster := makeCluster(ctx, "delnoid-cluster")
+			ncp := makeNCP(ctx, "delnoid-ncp", cluster, "delnoid-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "delnoid-creds", ns, "test-key")
+			makeCredSecret(ctx, "delnoid-creds")
 			defer cleanupObjects(ctx, cluster)
 
 			// Trigger deletion
@@ -574,10 +574,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should call DeletePlane and remove finalizer when planeID is set", func() {
-			cluster := makeCluster(ctx, "delok-cluster", ns)
-			ncp := makeNCP(ctx, "delok-ncp", ns, cluster, "delok-creds")
+			cluster := makeCluster(ctx, "delok-cluster")
+			ncp := makeNCP(ctx, "delok-ncp", cluster, "delok-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "delok-creds", ns, "test-key")
+			makeCredSecret(ctx, "delok-creds")
 			defer cleanupObjects(ctx, cluster)
 
 			fakeAPI := fakeclient.NewClient()
@@ -610,10 +610,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should tolerate 404 from DeletePlane and remove finalizer", func() {
-			cluster := makeCluster(ctx, "del404-cluster", ns)
-			ncp := makeNCP(ctx, "del404-ncp", ns, cluster, "del404-creds")
+			cluster := makeCluster(ctx, "del404-cluster")
+			ncp := makeNCP(ctx, "del404-ncp", cluster, "del404-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "del404-creds", ns, "test-key")
+			makeCredSecret(ctx, "del404-creds")
 			defer cleanupObjects(ctx, cluster)
 
 			fakeAPI := fakeclient.NewClient()
@@ -640,10 +640,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should return error and keep finalizer when DeletePlane fails with non-404", func() {
-			cluster := makeCluster(ctx, "delerr-cluster", ns)
-			ncp := makeNCP(ctx, "delerr-ncp", ns, cluster, "delerr-creds")
+			cluster := makeCluster(ctx, "delerr-cluster")
+			ncp := makeNCP(ctx, "delerr-ncp", cluster, "delerr-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "delerr-creds", ns, "test-key")
+			makeCredSecret(ctx, "delerr-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -672,10 +672,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal CreatePlane non-conflict error", func() {
 		It("should return error when CreatePlane fails with a non-409 error", func() {
-			cluster := makeCluster(ctx, "createerr-cluster", ns)
-			ncp := makeNCP(ctx, "createerr-ncp", ns, cluster, "createerr-creds")
+			cluster := makeCluster(ctx, "createerr-cluster")
+			ncp := makeNCP(ctx, "createerr-ncp", cluster, "createerr-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "createerr-creds", ns, "test-key")
+			makeCredSecret(ctx, "createerr-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -692,10 +692,10 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal UpdatePlane error", func() {
 		It("should return error when UpdatePlane fails", func() {
-			cluster := makeCluster(ctx, "upderr-cluster", ns)
-			ncp := makeNCP(ctx, "upderr-ncp", ns, cluster, "upderr-creds")
+			cluster := makeCluster(ctx, "upderr-cluster")
+			ncp := makeNCP(ctx, "upderr-ncp", cluster, "upderr-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "upderr-creds", ns, "test-key")
+			makeCredSecret(ctx, "upderr-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
 
 			fakeAPI := fakeclient.NewClient()
@@ -723,12 +723,12 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 
 	Context("reconcileNormal CA secret edge cases", func() {
 		It("should update existing CA secret that has no tls.key", func() {
-			cluster := makeCluster(ctx, "caupd-cluster", ns)
-			ncp := makeNCP(ctx, "caupd-ncp", ns, cluster, "caupd-creds")
+			cluster := makeCluster(ctx, "caupd-cluster")
+			ncp := makeNCP(ctx, "caupd-ncp", cluster, "caupd-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "caupd-creds", ns, "test-key")
+			makeCredSecret(ctx, "caupd-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
-			defer cleanupTestSecrets(ctx, cluster.Name, ns)
+			defer cleanupTestSecrets(ctx, cluster.Name)
 
 			// Pre-create a CA secret WITHOUT tls.key (should be updated, not skipped)
 			existingCASecret := &corev1.Secret{
@@ -762,12 +762,12 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should recreate CA secret when existing has wrong type", func() {
-			cluster := makeCluster(ctx, "catype-cluster", ns)
-			ncp := makeNCP(ctx, "catype-ncp", ns, cluster, "catype-creds")
+			cluster := makeCluster(ctx, "catype-cluster")
+			ncp := makeNCP(ctx, "catype-ncp", cluster, "catype-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "catype-creds", ns, "test-key")
+			makeCredSecret(ctx, "catype-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
-			defer cleanupTestSecrets(ctx, cluster.Name, ns)
+			defer cleanupTestSecrets(ctx, cluster.Name)
 
 			// Pre-create a CA secret with wrong type (Opaque instead of ClusterSecretType)
 			wrongTypeSecret := &corev1.Secret{
@@ -802,12 +802,12 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should return error when kubeconfig has no clusters", func() {
-			cluster := makeCluster(ctx, "noclusters-cluster", ns)
-			ncp := makeNCP(ctx, "noclusters-ncp", ns, cluster, "noclusters-creds")
+			cluster := makeCluster(ctx, "noclusters-cluster")
+			ncp := makeNCP(ctx, "noclusters-ncp", cluster, "noclusters-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "noclusters-creds", ns, "test-key")
+			makeCredSecret(ctx, "noclusters-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
-			defer cleanupTestSecrets(ctx, cluster.Name, ns)
+			defer cleanupTestSecrets(ctx, cluster.Name)
 
 			// Build a kubeconfig with no cluster entries
 			emptyKC := clientcmdapi.NewConfig()
@@ -829,12 +829,12 @@ var _ = Describe("NoPlaneControlPlane Controller", func() {
 		})
 
 		It("should return error when kubeconfig cluster has no CA data", func() {
-			cluster := makeCluster(ctx, "noca-cluster", ns)
-			ncp := makeNCP(ctx, "noca-ncp", ns, cluster, "noca-creds")
+			cluster := makeCluster(ctx, "noca-cluster")
+			ncp := makeNCP(ctx, "noca-ncp", cluster, "noca-creds")
 			addFinalizer(ctx, ncp)
-			makeCredSecret(ctx, "noca-creds", ns, "test-key")
+			makeCredSecret(ctx, "noca-creds")
 			defer cleanupObjects(ctx, cluster, ncp)
-			defer cleanupTestSecrets(ctx, cluster.Name, ns)
+			defer cleanupTestSecrets(ctx, cluster.Name)
 
 			// Build a kubeconfig with a cluster but no CA data
 			noCAKC := clientcmdapi.NewConfig()
