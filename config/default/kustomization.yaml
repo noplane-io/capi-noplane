@@ -9,10 +9,9 @@ namespace: capi-noplane-system
 namePrefix: capi-noplane-
 
 # Labels to add to all resources and selectors.
-#labels:
-#- includeSelectors: true
-#  pairs:
-#    someName: someValue
+labels:
+- pairs:
+    cluster.x-k8s.io/provider: control-plane-noplane
 
 resources:
 - ../crd

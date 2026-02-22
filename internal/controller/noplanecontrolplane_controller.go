@@ -18,6 +18,10 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"time"
 
@@ -26,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/clientcmd"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
@@ -39,7 +44,7 @@ import (
 )
 
 const (
-	noplaneFinalizer = "controlplane.noplane.io/finalizer"
+	noplaneFinalizer = "controlplane.cluster.x-k8s.io/finalizer"
 	fieldOwner       = "noplane-controlplane-controller"
 )
 
@@ -50,9 +55,9 @@ type NoPlaneControlPlaneReconciler struct {
 	ClientFactory noplane.ClientFactory
 }
 
-// +kubebuilder:rbac:groups=controlplane.noplane.io,resources=noplanecontrolplanes,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=controlplane.noplane.io,resources=noplanecontrolplanes/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=controlplane.noplane.io,resources=noplanecontrolplanes/finalizers,verbs=update
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=noplanecontrolplanes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=noplanecontrolplanes/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=noplanecontrolplanes/finalizers,verbs=update
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
@@ -87,7 +92,10 @@ func (r *NoPlaneControlPlaneReconciler) Reconcile(ctx context.Context, req ctrl.
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("fetching API key: %w", err)
 	}
-	apiClient := r.ClientFactory(apiKey)
+	apiClient, err := r.ClientFactory(apiKey)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("creating API client: %w", err)
+	}
 
 	if !ncp.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, &ncp, apiClient)
@@ -130,12 +138,22 @@ func (r *NoPlaneControlPlaneReconciler) reconcileNormal(
 	}
 
 	// Surface endpoint for CAPI core.
-	ncp.Spec.ControlPlaneEndpoint = clusterv1.APIEndpoint{
+	desiredEndpoint := clusterv1.APIEndpoint{
 		Host: plane.Endpoint.Host,
 		Port: int32(plane.Endpoint.Port),
 	}
+	if ncp.Spec.ControlPlaneEndpoint != desiredEndpoint {
+		ncp.Spec.ControlPlaneEndpoint = desiredEndpoint
+		if err := r.Update(ctx, ncp); err != nil {
+			return ctrl.Result{}, fmt.Errorf("updating control plane endpoint: %w", err)
+		}
+	}
 
 	if err := r.reconcileKubeconfig(ctx, cluster, ncp, apiClient); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileCASecret(ctx, cluster, ncp, apiClient); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -258,6 +276,99 @@ func (r *NoPlaneControlPlaneReconciler) reconcileKubeconfig(
 	}
 	if err != nil {
 		return fmt.Errorf("checking kubeconfig secret: %w", err)
+	}
+
+	existing.Data = secret.Data
+	existing.Labels = secret.Labels
+	return r.Update(ctx, existing)
+}
+
+// reconcileCASecret creates/updates a "<cluster>-ca" secret with the real CA cert
+// from the kubeconfig and a dummy private key. CABPK requires tls.key to be non-empty
+// (EnsureAllExist guard) but never uses it cryptographically for workers — it only
+// hashes tls.crt for discovery and creates bootstrap tokens via the remote API server.
+func (r *NoPlaneControlPlaneReconciler) reconcileCASecret(
+	ctx context.Context,
+	cluster *clusterv1.Cluster,
+	ncp *controlplanev1alpha1.NoPlaneControlPlane,
+	apiClient noplane.ClientInterface,
+) error {
+	secretName := fmt.Sprintf("%s-ca", cluster.Name)
+
+	// If the secret already has a non-empty tls.key, skip — no need to regenerate.
+	existing := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: cluster.Namespace}, existing)
+	if err == nil && len(existing.Data["tls.key"]) > 0 {
+		return nil
+	}
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("checking CA secret: %w", err)
+	}
+
+	kubeconfigBytes, err := apiClient.GetKubeconfig(ctx, ncp.Status.PlaneID)
+	if err != nil {
+		return fmt.Errorf("fetching kubeconfig for CA extraction: %w", err)
+	}
+
+	cfg, err := clientcmd.Load(kubeconfigBytes)
+	if err != nil {
+		return fmt.Errorf("parsing kubeconfig: %w", err)
+	}
+
+	if len(cfg.Clusters) == 0 {
+		return fmt.Errorf("kubeconfig contains no clusters")
+	}
+
+	var caData []byte
+	for _, c := range cfg.Clusters {
+		caData = c.CertificateAuthorityData
+		break
+	}
+	if len(caData) == 0 {
+		return fmt.Errorf("kubeconfig cluster entry has no certificate-authority-data")
+	}
+
+	// Generate a dummy RSA key to satisfy CABPK's EnsureAllExist guard.
+	// This key is never used cryptographically — CABPK only uses the cert
+	// (for CA hash) and creates tokens via the remote API server.
+	dummyKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return fmt.Errorf("generating dummy CA key: %w", err)
+	}
+	dummyKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(dummyKey),
+	})
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: cluster.Namespace,
+			Labels: map[string]string{
+				clusterv1.ClusterNameLabel: cluster.Name,
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(cluster, clusterv1.GroupVersion.WithKind("Cluster")),
+			},
+		},
+		Type: clusterv1.ClusterSecretType,
+		Data: map[string][]byte{
+			"tls.crt": caData,
+			"tls.key": dummyKeyPEM,
+		},
+	}
+
+	if apierrors.IsNotFound(r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: cluster.Namespace}, existing)) {
+		return r.Create(ctx, secret)
+	}
+
+	// Secret type is immutable after creation. If the existing secret has a
+	// different type we must delete and recreate it.
+	if existing.Type != secret.Type {
+		if err := r.Delete(ctx, existing); err != nil {
+			return fmt.Errorf("deleting CA secret with wrong type: %w", err)
+		}
+		return r.Create(ctx, secret)
 	}
 
 	existing.Data = secret.Data

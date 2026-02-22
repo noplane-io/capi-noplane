@@ -1,0 +1,119 @@
+# Example cluster manifest for CAPI with NoPlane control plane and Hetzner infrastructure.
+#
+# Before applying, replace:
+#   - <YOUR_SSH_KEY_NAME>: Name of SSH key in your Hetzner Cloud project
+#
+# Required secrets in the cluster namespace:
+#   - noplane-credentials: Contains apiKey for noplane.io API
+#   - hetzner: Contains hcloud token for Hetzner Cloud API
+#
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Cluster
+metadata:
+  name: my-cluster
+  namespace: default
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        - 10.244.0.0/16
+    services:
+      cidrBlocks:
+        - 10.96.0.0/12
+  controlPlaneRef:
+    apiGroup: controlplane.cluster.x-k8s.io
+    kind: NoPlaneControlPlane
+    name: my-cluster
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: HetznerCluster
+    name: my-cluster
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1alpha1
+kind: NoPlaneControlPlane
+metadata:
+  name: my-cluster
+  namespace: default
+spec:
+  version: v1.33.0
+  credentialsSecretRef:
+    name: noplane-credentials
+    namespace: default
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: HetznerCluster
+metadata:
+  name: my-cluster
+  namespace: default
+spec:
+  controlPlaneEndpoint:
+    host: my-cluster.k8s.noplane.io
+    port: 6443
+  controlPlaneLoadBalancer:
+    enabled: false
+  controlPlaneRegions:
+    - fsn1
+  hetznerSecretRef:
+    name: hetzner
+    key:
+      hcloudToken: hcloud
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: HCloudMachineTemplate
+metadata:
+  name: my-cluster-workers
+  namespace: default
+spec:
+  template:
+    spec:
+      imageName: ubuntu-24.04
+      type: cpx22
+      sshKeys:
+        - name: <YOUR_SSH_KEY_NAME>
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+kind: KubeadmConfigTemplate
+metadata:
+  name: my-cluster-workers
+  namespace: default
+spec:
+  template:
+    spec:
+      preKubeadmCommands:
+        - apt-get update
+        - apt-get install -y curl wget
+        - curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.33/deb/Release.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/kubernetes-archive-keyring.gpg
+        - echo "deb [signed-by=/etc/apt/trusted.gpg.d/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
+        - apt-get update
+        - apt-get install -y kubelet kubeadm kubectl containerd
+        - systemctl start containerd
+      joinConfiguration:
+        nodeRegistration:
+          kubeletExtraArgs:
+            - name: cloud-provider
+              value: external
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: MachineDeployment
+metadata:
+  name: my-cluster-workers
+  namespace: default
+spec:
+  clusterName: my-cluster
+  replicas: 1
+  selector:
+    matchLabels: {}
+  template:
+    spec:
+      clusterName: my-cluster
+      version: v1.33.0
+      bootstrap:
+        configRef:
+          apiGroup: bootstrap.cluster.x-k8s.io
+          kind: KubeadmConfigTemplate
+          name: my-cluster-workers
+      infrastructureRef:
+        apiGroup: infrastructure.cluster.x-k8s.io
+        kind: HCloudMachineTemplate
+        name: my-cluster-workers

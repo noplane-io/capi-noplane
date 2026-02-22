@@ -2,9 +2,18 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
-- bases/controlplane.noplane.io_noplanecontrolplanes.yaml
-- bases/controlplane.noplane.io_noplanecontrolplanetemplates.yaml
+- bases/controlplane.cluster.x-k8s.io_noplanecontrolplanes.yaml
+- bases/controlplane.cluster.x-k8s.io_noplanecontrolplanetemplates.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
+
+# CAPI contract version labels required by the CAPI core controller.
+# These must survive controller-gen regeneration, so they live here rather
+# than in the generated CRD base files.
+labels:
+- pairs:
+    cluster.x-k8s.io/provider: control-plane-noplane
+    cluster.x-k8s.io/v1beta1: v1alpha1
+    clusterctl.cluster.x-k8s.io: ""
 
 patches:
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.

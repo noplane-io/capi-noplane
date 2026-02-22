@@ -22,12 +22,14 @@ linters:
     - unconvert
     - unparam
     - unused
-    - logcheck
+  # TODO: find proper setup with github actions.
+  #   - logcheck
+  #settings:
+  #  custom:
+  #    logcheck:
+  #      type: "module"
+  #      description: Checks Go logging calls for Kubernetes logging conventions.
   settings:
-    custom:
-      logcheck:
-        type: "module"
-        description: Checks Go logging calls for Kubernetes logging conventions.
     revive:
       rules:
         - name: comment-spacings

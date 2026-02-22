@@ -146,6 +146,15 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	"$(KUSTOMIZE)" build config/default > dist/install.yaml
 
+RELEASE_DIR ?= out
+
+.PHONY: release
+release: manifests generate kustomize ## Build clusterctl release artifacts.
+	mkdir -p $(RELEASE_DIR)
+	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
+	"$(KUSTOMIZE)" build config/default > $(RELEASE_DIR)/control-plane-components.yaml
+	cp metadata.yaml $(RELEASE_DIR)/metadata.yaml
+
 ##@ Deployment
 
 ifndef ignore-not-found
